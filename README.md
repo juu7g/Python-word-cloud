@@ -73,7 +73,7 @@
 ## プログラムの説明サイト Program description site
 
 - 使い方：[単語の使用頻度をワードクラウドで表示するアプリ【フリー】 - プログラムでおかえしできるかな](https://juu7g.hatenablog.com/entry/Python/word-cloud-exe)  
-- 作り方：*準備中*[単語の使用頻度をワードクラウドで表示するアプリの作り方【Python】 - プログラムでおかえしできるかな](https://juu7g.hatenablog.com/entry/Python/word-cloud)  
+- 作り方：[単語の使用頻度をワードクラウドで表示するアプリの作り方【Python】 - プログラムでおかえしできるかな](https://juu7g.hatenablog.com/entry/Python/word-cloud)  
   
 ## 作者 Authors
 juu7g
