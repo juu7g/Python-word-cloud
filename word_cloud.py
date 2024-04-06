@@ -44,6 +44,15 @@ class MyFrame(tk.Frame):
         self.btn_stop_w = tk.Button(master, text='非表示単語指定', state=tk.DISABLED
                             , command=self.input_stopword)
         self.btn_stop_w.pack(side=tk.LEFT)
+        # 出力単語数
+        lbl_max_words = tk.Label(master, text='出力単語数')
+        lbl_max_words.pack(side=tk.LEFT)
+        self.var_max_words = tk.IntVar(master, value=50)
+        ety_max_words = tk.Entry(master, textvariable=self.var_max_words
+                        , width=3, justify=tk.RIGHT
+                        , validate="key"
+                        , vcmd=(self.register(self.entry_validate), "%P"))
+        ety_max_words.pack(side=tk.LEFT)
         # キャンバス作成
         self.create_canvas(frm_canvas)
         # コンテキストメニュー作成(貼り付けのみ)
@@ -89,10 +98,27 @@ class MyFrame(tk.Frame):
         self.my_ctr.create_wordcloud(text)
 
     def input_stopword(self, event=None):
+        """
+        非表示にする単語をの入力がダイアログを表示し入力された単語を設定
+        """
         s = simpledialog.askstring('非表示単語指定', '表示したくない単語をカンマ区切りで入力してください', initialvalue=self.stopword)
         if s == None: return    # キャンセルの場合は何もせず戻る
         self.stopword = s
-        self.my_ctr.view_word_cloud(s)
+        mw = self.var_max_words.get()
+        self.my_ctr.view_word_cloud(s, max_words=mw if mw else 50)
+
+    def entry_validate(self, modifyed_str:str) -> bool:
+        """
+        エントリーの入力検証
+        intVarをtraceで使う場合、ここで空文字にならないようにすると
+        エントリーの内容が空になるような変更はできなくなり操作しにくい
+        ここでは挿入・削除されるテキストを対象にし空文字の対策は別途行う
+        Args:
+            str:    挿入・削除されるテキスト
+        """
+        result = modifyed_str.isdigit()     # 数字かどうか
+        return result
+
 
 class MyModel():
     """
@@ -107,6 +133,7 @@ class MyModel():
     def load_text_file(self):
         """
         テキストファイルの読み込み(ファイル選択ダイアログ表示)
+        読み込んだテキストはself.textへ設定
         """
         self.text = ""
         paths = filedialog.askopenfilenames(
@@ -140,10 +167,12 @@ class MyControl():
 
     def create_wordcloud(self, text:str):
         """
+        ワードクラウドの作成
         """        
         if not text: return
-        self.words = self.create_wakachigaki(text)
-        self.view_word_cloud()
+        self.words = self.create_wakachigaki(text)  # テキストマイニングして単語のリストを取得
+        mw = self.view.var_max_words.get()          # 出力単語数を取得
+        self.view_word_cloud(max_words=mw if mw else 50)    # ワードクラウドの作成
         self.view.btn_save.config(state=tk.NORMAL)  # ボタンを有効にする
         self.view.btn_once.config(state=tk.NORMAL)  # ボタンを有効にする
         self.view.btn_stop_w.config(state=tk.NORMAL)  # ボタンを有効にする
@@ -154,42 +183,48 @@ class MyControl():
     def create_wakachigaki(self, text:str):
         """
         テキストマイニング
+        日本語を単語分割し品詞を付与し単語と品詞のタプルのリストをall_tokensにセットする
+        そのうち半角英数字記号を除き、品詞が名詞|形容詞|接頭辞|接尾辞のものをリストで返す
+        Returns:
+            list:   単語のリスト
         """
-        tagger = MeCab.Tagger() # 
+        # MeCabの出力を表層文字列、品詞にし、EOSを出力しないで使用する。
+        tagger = MeCab.Tagger('-O "" -F "%m\\t%F-[0,1,2,3]\\n" -E ""')  # raw文字列は使えない
         tokens = tagger.parse(text)
-        self.all_tokens = [l.split() for l in tokens.splitlines()]
+        # [[表層文字列, 品詞]...]を作成
+        self.all_tokens = [l.split("\t") for l in tokens.splitlines()]
         logger.debug(self.all_tokens)
         logger.info(f"　全単語数：{len(self.all_tokens)}")
-        # 品詞が名詞と形容詞のものだけを抽出。英数字を省く
-        # tokens = [s[0] for s in tokens if len(s) > 3 and s[4].startswith('名詞') and re.match(r"[^a-zA-Z0-9\W]+", s[0])]
-        tokens = [s[0] for s in self.all_tokens if len(s) > 3 and re.match('名詞|形容詞|接頭辞|接尾辞', s[4]) and re.match(r"[^a-zA-Z0-9\W]+", s[0])]
+        # 品詞が名詞|形容詞|接頭辞|接尾辞のものだけを抽出。英数字を省く
+        tokens = [s[0] for s in self.all_tokens if re.match('名詞|形容詞|接頭辞|接尾辞', s[1]) and re.match(r"[^a-zA-Z0-9\W]+", s[0])]
         logger.info(f"抽出単語数：{len(tokens)}")
         logger.debug(tokens)
         logger.debug(collections.Counter(tokens).most_common(10))
         return tokens
 
-    def view_word_cloud(self, stopwords:str=""):
+    def view_word_cloud(self, stopwords:str="", max_words:int=50):
         """
         ワードクラウド生成    generateであれば単語の出現頻度も調べる
         Args:
             str:    非表示ワード(カンマ区切り)
+            int:    出力単語数
         """
-        self.wc = WordCloud(font_path="meiryo.ttc"   # 日本語フォントを指定
+        self.wc = WordCloud(font_path="meiryo.ttc"  # 日本語フォントを指定
                     , background_color="white"
-                    , max_words=50              # 出力する単語数
+                    , max_words=max_words           # 出力する単語数
                     , width=800
                     , height=400
                     # , relative_scaling=1
-                    # , regexp=r"[^a-zA-Z0-9\W]+" # 単語の抽出条件
-                    , collocations=False        # 連語の連結
+                    # , regexp=r"[^a-zA-Z0-9\W]+"   # 単語の抽出条件
+                    , collocations=False            # 連語の連結
                     , stopwords=set(stopwords.split(','))    # {"こと", "ため", "ない"}
                     # , min_word_length=1        # 最低文字長の指定
-                    )        # 最低文字長の指定
-        self.wc.generate(" ".join(self.words))           # 日本語の単語を空白でつなげて渡す
+                    )
+        self.wc.generate(" ".join(self.words))  # 日本語の単語を空白でつなげて渡す
 
         # ワードクラウドをAxesに追加
-        self.view.ax.imshow(self.wc, interpolation="bilinear")
-        self.view.canvas.draw()
+        self.view.ax.imshow(self.wc, interpolation="bilinear")  # データをイメージに
+        self.view.canvas.draw()                                 # 表示
     
     def save_image(self, event=None):
         """
@@ -224,11 +259,11 @@ class MyControl():
         品詞チェック チェック結果はloggerに出力
         """
         # 品詞だけを抽出
-        tokens = [re.sub("-.+", "", s[4]) for s in self.all_tokens if len(s) > 3]
+        tokens = [re.sub("-.+", "", s[1]) for s in self.all_tokens]
         c = collections.Counter(tokens)
         logger.debug(c.most_common(20))
         # 気になる単語の品詞チェック
-        tokens = [(s[0], s[4]) for s in self.all_tokens if len(s) > 3 and s[0]== 'お']
+        tokens = [(s[0], s[1]) for s in self.all_tokens if s[0]== 'お']
         c = collections.Counter(tokens)
         logger.debug(c.most_common())
 
